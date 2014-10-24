@@ -1,0 +1,3 @@
+These files are for annotating tab separated files containing lists of target variants. Work in progress.
+
+Data files should be added to the "data_files" directory so that they are not uploaded to GitHub
