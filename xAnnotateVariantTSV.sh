@@ -14,7 +14,8 @@ while getopts i:o: opt; do
 done
 
 #check for array and if appropriate get the file name from the provided list
-if [[ $SGE_TASK_ID ]];then
+if [[ $SGE_TASK_ID != "undefined" ]];then
+    echo "TET"
     InpFil=`head -n $SGE_TASK_ID $InpFil | tail -n 1`
 fi
 
@@ -27,7 +28,7 @@ fi
 
 # location of annovar database adn the custom annotation table
 AnnDir=/ifs/scratch/c2b2/af_lab/ads2202/bin/annovar
-AnnTab=/ifs/scratch/c2b2/af_lab/ads2202/Exome_Seq/scripts/NewAnnotationsForWendy/Final_Gene_Annotation_Table.txt
+AnnTab=/ifs/scratch/c2b2/ys_lab/yshen/WENDY/VariantsAnnotationPipeline/Final_Gene_Annotation_Table.txt
 
 echo $InpFil
 echo $OutFil
@@ -64,8 +65,10 @@ eval $CMD2
 R --vanilla <<RSCRIPT
 options(stringsAsFactors=F)
 #get data
-dat <- read.delim("$InpFil")
-dat <- dat[,1:(grep("INFO", colnames(dat))-1)]
+dat.all <- read.delim("$InpFil")
+#split dat into basic info and full GTs
+dat <- dat.all[,1:(grep("FILTER", colnames(dat.all))-1)]
+FulGTs <- dat.all[,(grep("INFO", colnames(dat.all))+1):ncol(dat.all)]
   #add leading space to genotypes to deal with Excel date format issue
 GT1col <- grep("PredictionSummary", colnames(dat))+1
 for(i in GT1col:ncol(dat)){
@@ -97,7 +100,7 @@ if(length(whi)>0){TOLERANCE.specific[whi] <- annot[whi,"TOLERANCE_FRAMESHIFT"]}
 #find columns to split annot at 
 col1 <- grep("TOLERANCE_ALL_DALY", colnames(annot))
 col2 <- grep("TOLERANCE_FRAMESHIFT", colnames(annot))+1
-out <- cbind(dat, CLINVAR, annot[,2:col1], TOLERANCE.specific, annot[,col2:ncol(annot)])
+out <- cbind(dat, CLINVAR, annot[,2:col1], TOLERANCE.specific, annot[,col2:ncol(annot)], FulGTs)
 write.table(out, "$OutFil", sep="\t", col.names=T, row.names=F, quote=F)
 RSCRIPT
 
@@ -113,6 +116,8 @@ cat $OutFil | awk '{ if ( $1 == "Chromosome" ){
     gsub ( /_WES_STUDY__RARE_OR_MENDELIAN__[0-9]*/, "");
     gsub ( /_DIABETES_[0-9]*/, "");
     gsub ( /_CHD_[0-9]*/, "");
+    gsub ( /GERP../, "GERP++");
+    gsub ( /\.1/, "");
     };
     print }' > $OutFil.temp
 mv $OutFil.temp $OutFil
