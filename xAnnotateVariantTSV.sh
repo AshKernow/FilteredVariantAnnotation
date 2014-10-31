@@ -14,8 +14,7 @@ while getopts i:o: opt; do
 done
 
 #check for array and if appropriate get the file name from the provided list
-if [[ $SGE_TASK_ID != "undefined" ]];then
-    echo "TET"
+if [[ ! -z $SGE_TASK_ID ]] && [[ $SGE_TASK_ID != "undefined" ]];then
     InpFil=`head -n $SGE_TASK_ID $InpFil | tail -n 1`
 fi
 
@@ -35,9 +34,8 @@ echo $OutFil
 
 #check input has variants to annotate
 LinNum=`cat $InpFil | wc -l`
-if [[ $LinNum -eq 1 ]];then
+if [[ $LinNum -lt 2 ]];then
     echo "There are no variants to annotate"
-    touch $OutFil
     exit
 fi
 
@@ -66,9 +64,7 @@ R --vanilla <<RSCRIPT
 options(stringsAsFactors=F)
 #get data
 dat.all <- read.delim("$InpFil")
-#split dat into basic info and full GTs
-dat <- dat.all[,1:(grep("FILTER", colnames(dat.all))-1)]
-FulGTs <- dat.all[,(grep("INFO", colnames(dat.all))+1):ncol(dat.all)]
+dat <- dat.all[,1:(grep("FILTER", colnames(dat.all)))]
   #add leading space to genotypes to deal with Excel date format issue
 GT1col <- grep("PredictionSummary", colnames(dat))+1
 for(i in GT1col:ncol(dat)){
@@ -100,9 +96,26 @@ if(length(whi)>0){TOLERANCE.specific[whi] <- annot[whi,"TOLERANCE_FRAMESHIFT"]}
 #find columns to split annot at 
 col1 <- grep("TOLERANCE_ALL_DALY", colnames(annot))
 col2 <- grep("TOLERANCE_FRAMESHIFT", colnames(annot))+1
-out <- cbind(dat, CLINVAR, annot[,2:col1], TOLERANCE.specific, annot[,col2:ncol(annot)], FulGTs)
-write.table(out, "$OutFil", sep="\t", col.names=T, row.names=F, quote=F)
+out <- cbind(dat, CLINVAR, annot[,2:col1], TOLERANCE.specific, annot[,col2:ncol(annot)])
+splicord <- grepl("splicing", out[,"VariantFunction"]) #sort splicing to the nonsense to the top
+nonseord <- grepl("stop", out[,"VariantClass"]) # then stopgain/stoploss
+indelfsord <- grepl("^frameshift", out[,"VariantClass"]) # then frameshift indels
+indelnford <- grepl("nonframeshift", out[,"VariantClass"]) # then non-frameshift indels
+predord <- match(out[,"PredictionSummary"], c("Med", "High")) #then high likelihood deleterious missense (sort order is "decreasing", so "M" would come above "H")
+for(i in 1:ncol(out)){
+  cnt <- which(nchar(out[,i])>32760) 
+  if(length(cnt)>0){
+    out[cnt,i] <- paste(substr(out[cnt,i], 1, 32740), ":::---TRUNCATED_FOR_EXCEL")
+  }
+}
+ord <- order(predord, splicord, nonseord, indelfsord, indelnford, out[,"CADDscore"], out[,"GERP.."], decreasing=T) #final sort by CADD and then GERP
+write.table(out[ord,], "$OutFil", sep="\t", col.names=T, row.names=F, quote=F)
 RSCRIPT
+
+if [[ $? -gt 0 ]]; then
+    echo "Annotation Failed"
+    exit
+fi
 
 
 ###This is specific for the REGENERON PROJECT as the samples names were extended by Regeneron, this just removes the additional bits
@@ -117,6 +130,7 @@ cat $OutFil | awk '{ if ( $1 == "Chromosome" ){
     gsub ( /_DIABETES_[0-9]*/, "");
     gsub ( /_CHD_[0-9]*/, "");
     gsub ( /GERP../, "GERP++");
+    gsub ( /prediction/, "");
     gsub ( /\.1/, "");
     };
     print }' > $OutFil.temp
@@ -124,3 +138,4 @@ mv $OutFil.temp $OutFil
 
 # remove temporary files
 rm -f $InpFil.tempann*
+echo "Annotation complete"
